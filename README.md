@@ -7,7 +7,7 @@ Some features:
 
 - intelligently prune non-promising branches of the search tree with Maxparts method
 - pre-computed score table
-- super fast (thanks to Clang) polynomial dot product hashing for equivalence pruning
+- super fast (thanks to Clang compiler) hybrid polynomial dot product & hash table equivalence pruning
 - custom tuned vectorization of loops
 
 How to compile and run:
@@ -33,6 +33,6 @@ Example end of output:
 
 5625 / 1296 = 4.34028 average moves to finish!
 
-19.9356 seconds
+16.0356 seconds
 
 Press Enter to exit...
