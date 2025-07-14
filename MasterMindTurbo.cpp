@@ -23,6 +23,7 @@ template <uFast A> struct get_power<A, 0> { static const uFast value = 1; };
 const uFast s = get_power<c, n>::value; // Number of combinations (c^n)
 const uFast imark0_val = (uFast)(double(n) * ((double(n) / 2.0) + 1.5));
 
+// Replace slow decimal math with fast, packed base-c integers.
 struct code_t {
     uFast v;
     // Decode into n digits (base c)
@@ -52,11 +53,13 @@ struct code_t {
 
 static code_t Valids[s + 1];
 
+// New FillSet for base-c code_t
 void FillSet(uFast current_code, uFast pos, uFast& counter) {
     if (pos == n) { Valids[counter++] = { current_code }; return; }
     for (uFast i = 0; i < c; ++i) FillSet(current_code * c + i, pos + 1, counter);
 }
 
+// --- OPTIMIZATION 2: REWRITTEN SCORING KERNEL ---
 static uFast iMark[imark0_val + 1];
 static uFast mark_to_idx[n + 1][n + 1];
 
@@ -81,8 +84,10 @@ inline uFast score(code_t guess, code_t secret) {
     std::array<uFast, n> g_digits, s_digits;
     guess.unpack(g_digits);
     secret.unpack(s_digits);
+
     uFast black = 0;
     std::array<uFast, c> g_counts{}, s_counts{};
+
     for (uFast i = 0; i < n; ++i) {
         if (g_digits[i] == s_digits[i]) {
             black++;
@@ -241,7 +246,8 @@ GetNext:
         for (guess = g[lvl]; guess <= ubPure[lvl]; guess++) {
             for (sign = r[lvl]; sign <= imark0; sign++) {
                 if (MapConsistent(lvl, guess, sign) == 0) continue;
-                g[lvl] = guess; r[lvl] = sign;
+                g[lvl] = guess;
+                r[lvl] = sign;
                 if (sign == imark0) {
                     x++;
                     RowSum[x] = lvl;
@@ -278,18 +284,21 @@ GetNext:
                 p = MapConsistent(l, g[l], r[l]);
                 x0 = x - (ubPure[lvl] * p);
                 for (i = 1; i <= ubPure[lvl]; i++) {
-                    GuessSum[i] = 0;
-                    for (j = 1; j <= p; j++) GuessSum[i] += RowSum[x0 + j + ((i - 1) * p)];
-                    if (GuessSum[i] < gMin) {
-                        gMin = GuessSum[i];
+                    int sum = 0;
+                    int baseOffset = x0 + (i - 1) * p;
+                    for (j = 1; j <= p; j++) sum += RowSum[baseOffset + j];
+                    GuessSum[i] = sum;
+                    if (sum < gMin) {
+                        gMin = sum;
                         k = i;
                     }
                 }
+                int sourceBase = x0 + (k - 1) * p;
                 for (i = 1; i <= p; i++) {
-                    l = x0 + i;
-                    m = l + ((k - 1) * p);
-                    RowSum[l] = RowSum[m];
-                    for (j = 1; j < maxdepth; j++) list[j][l] = list[j][m];
+                    int destIndex = x0 + i;
+                    int sourceIndex = sourceBase + i;
+                    RowSum[destIndex] = RowSum[sourceIndex];
+                    for (j = 1; j < maxdepth; j++) list[j][destIndex] = list[j][sourceIndex];
                 }
                 x = x0 + p;
             }
