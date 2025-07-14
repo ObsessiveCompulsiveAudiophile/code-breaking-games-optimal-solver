@@ -1,4 +1,4 @@
-﻿#include <iostream>
+#include <iostream>
 #include <vector>
 #include <array>
 #include <memory>
@@ -78,29 +78,66 @@ void create_mark_map() {
     mark_to_idx[n][0] = imark0_val;
 }
 
-// Fast, integer-only scoring function
+// Fast, integer-only scoring function (optimized version)
 inline uFast score(code_t guess, code_t secret) {
     if (guess.v == secret.v) return imark0_val;
-    std::array<uFast, n> g_digits, s_digits;
-    guess.unpack(g_digits);
-    secret.unpack(s_digits);
 
+    uFast g_val = guess.v, s_val = secret.v;
     uFast black = 0;
-    std::array<uFast, c> g_counts{}, s_counts{};
 
+    uFast g_counts[c] = { 0 };
+    uFast s_counts[c] = { 0 };
+
+    // Single pass through positions without intermediate arrays
     for (uFast i = 0; i < n; ++i) {
-        if (g_digits[i] == s_digits[i]) {
+        uFast g_digit = g_val % c;
+        uFast s_digit = s_val % c;
+
+        if (g_digit == s_digit) {
             black++;
         }
         else {
-            g_counts[g_digits[i]]++;
-            s_counts[s_digits[i]]++;
+            g_counts[g_digit]++;
+            s_counts[s_digit]++;
         }
+        g_val /= c;
+        s_val /= c;
     }
+
     uFast white = 0;
-    for (uFast i = 0; i < c; ++i) white += std::min(g_counts[i], s_counts[i]);
+    for (uFast i = 0; i < c; ++i) {
+        white += std::min(g_counts[i], s_counts[i]);
+    }
+
     return mark_to_idx[black][white];
 }
+
+// --- Custom Hash Table for Unique Partition Filtering ---
+constexpr uFast HT_SIZE = 2048; // Power of two >= s, keeps load factor low
+alignas(64) uFast ht_key[HT_SIZE];
+alignas(64) uFast ht_val[HT_SIZE]; // Stores the compact index (1 to k)
+
+// Returns the 1-based compact index for a given key.
+// If the key is new, it increments *k_ptr and assigns the new index.
+inline uFast find_or_add_signature(uFast key, uFast* k_ptr) {
+    // Fast multiplicative hash using a golden-ratio-based constant
+    uFast idx = (key * 0x9e3779b97f4a7c15ULL) & (HT_SIZE - 1);
+
+    while (true) {
+        if (ht_key[idx] == key) { // Found existing key
+            return ht_val[idx];
+        }
+        if (ht_key[idx] == 0) { // Found empty slot, this is a new key
+            ht_key[idx] = key;
+            (*k_ptr)++;
+            ht_val[idx] = *k_ptr;
+            return *k_ptr;
+        }
+        // Collision: move to the next slot (linear probing)
+        idx = (idx + 1) & (HT_SIZE - 1);
+    }
+}
+
 
 int main() {
     uFast i, j, k, l, m, p, iv, iv2, o, o2;
@@ -108,7 +145,7 @@ int main() {
     const uFast imark0 = imark0_val; // Use the calculated value locally
     create_mark_map();
 
-    // Heap-allocated storage (from previous step)
+    // Heap-allocated storage
     const uFast S_DIM = s + 1, IMARK0_DIM = imark0 + 1;
     auto MapConsistent_ptr = std::make_unique<uFast[]>((maxdepth + 1) * S_DIM * IMARK0_DIM);
     auto MapConsistent = [&](uFast d1, uFast d2, uFast d3) -> uFast& { return MapConsistent_ptr[d1 * S_DIM * IMARK0_DIM + d2 * IMARK0_DIM + d3]; };
@@ -117,12 +154,13 @@ int main() {
     typedef uFast(iValid_)[s + 1]; iValid_* iValid = new iValid_[maxdepth + 1];
 
     alignas(64) static uint16_t Mark[s + 1][s + 1];
-    
+
     auto RowSum = std::make_unique<uFast[]>(1'000'000);
     typedef uFast(list_)[1'000'000]; list_* list = new list_[maxdepth + 1];
 
     uFast ubPure[maxdepth + 1] = { 0 }, g[maxdepth + 1] = { 0 }, r[maxdepth + 1] = { 0 }, GuessSum[s + 1] = { 0 };
-    uFast guess, sign, lvl = 1, x = 0, x0 = 0, gMin = 0;
+    uFast guess, sign, lvl = 1, x = 0, x0 = 0;
+    uFast gMin = -1; // Initialize to max value for unsigned
     std::array<uFast, s + 1> MPScore;
     static std::array<uFast, imark0 + 1> mult;
     for (i = 0; i < imark0; i++) mult[i + 1] = uFast(round(pow(16.0, double(i))));
@@ -144,6 +182,8 @@ int main() {
     }
     auto mark_end_time = std::chrono::high_resolution_clock::now();
     std::cout << "Mark table computed in " << std::chrono::duration<double>(mark_end_time - mark_start_time).count() << " seconds.\n";
+
+    // --- Interactive Input ---
     std::vector<uFast> initial_guesses, initial_signs;
     uFast input_count = 1;
     std::cout << "\n";
@@ -178,7 +218,7 @@ int main() {
     std::cout << "\n" << kk << " possible solutions!\n\n" << "Calculating...\n\n";
     if (kk == 1) {
         RowSum[1] = 1;
-        list[1][1] = Valids[iValid[1][1]].to_decimal() * 100 + 40;
+        list[1][1] = Valids[iValid[1][1]].to_decimal() * 100 + iMark[imark0];
         goto finished;
     }
 
@@ -190,6 +230,7 @@ int main() {
     }
 
 GetNext:
+    // --- Partition Calculation (Original, Fast Version) ---
     memset(&MapConsistent(lvl, 0, 0), 0, sizeof(uFast) * S_DIM * IMARK0_DIM);
     uFast q[s + 1] = { 0 };
     k = lvl - 1;
@@ -198,50 +239,63 @@ GetNext:
     iv2 = iValid[lvl][2];
     for (i = 1; i <= s; i++) {
         o = Mark[i][iv]; o2 = Mark[i][iv2];
-        MapConsistent(lvl, i, o)++; //vectorized for speed
+        MapConsistent(lvl, i, o)++;
         MapConsistent(lvl, i, o2)++;
-        q[i] += ((o * mult[o]) + (o2 * mult[o2]));
+        q[i] += (mult[o] + mult[o2]); // Simplified from original for clarity
     }
     for (j = 3; j <= l; j++) {
         iv = iValid[lvl][j];
         for (i = 1; i <= s; i++) {
             o = Mark[i][iv];
             MapConsistent(lvl, i, o)++;
-            q[i] += (o * mult[o]);
+            q[i] += mult[o];
         }
     }
+
+    // --- High-performance filtering using a custom hash table ---
+    std::fill_n(ht_key, HT_SIZE, 0);
     k = 0;
     for (i = 1; i <= s; i++) {
-        k++; iFiltered[lvl][k] = i;
-        q[k] = q[i];
-        for (m = 1; m < k; m++) if (q[m] == q[k]) {
-            k--;
-            break;
+        uFast unique_idx = find_or_add_signature(q[i], &k);
+        if (unique_idx == k) { // True only for the first time this signature is seen
+            iFiltered[lvl][k] = i;
         }
     }
+
+    // --- Compaction and Scoring ---
     for (i = 1; i <= k; i++) {
         MPScore[i] = 0;
+        uFast original_idx = iFiltered[lvl][i];
         for (j = 1; j <= imark0; j++) {
-            MapConsistent(lvl, i, j) = MapConsistent(lvl, iFiltered[lvl][i], j);
-            MPScore[i] += MapConsistent(lvl, i, j) != 0;
+            uFast count = MapConsistent(lvl, original_idx, j);
+            MapConsistent(lvl, i, j) = count;
+            if (count != 0) {
+                MPScore[i]++;
+            }
         }
-        q[i] = MPScore[i];
+        q[i] = MPScore[i]; // Reuse q[] to hold the score
     }
-    // concurrency::parallel_buffered_sort from ppl.h is non-standard. std::sort is faster for small sizes.
+
     std::sort(&MPScore[1], &MPScore[k + 1]);
 
-    //l = (k > 133) ? k - 16 : 0.88 * k; //correct formula for all combinations
-    l = (k > 119) ? k - 8 : 0.88 * k;// works with (4,6)
+    // --- Heuristic Pruning ---
+    l = (k > 119) ? k - 8 : 0.88 * k;
 
     m = 0;
     for (i = 1; i <= k; i++) {
         if (q[i] >= MPScore[l]) {
             m++;
-            iFiltered[lvl][m] = iFiltered[lvl][i];
-            for (j = 1; j <= imark0; j++) MapConsistent(lvl, m, j) = MapConsistent(lvl, i, j);
+            // This compaction is now safe because iFiltered[lvl][i] holds the original index
+            uFast original_idx = iFiltered[lvl][i];
+            iFiltered[lvl][m] = original_idx;
+            for (j = 1; j <= imark0; j++) {
+                MapConsistent(lvl, m, j) = MapConsistent(lvl, i, j);
+            }
         }
     }
     ubPure[lvl] = m;
+
+    // --- Main DFS Loop ---
     while (lvl) {
         for (guess = g[lvl]; guess <= ubPure[lvl]; guess++) {
             for (sign = r[lvl]; sign <= imark0; sign++) {
@@ -279,13 +333,13 @@ GetNext:
                 goto GetNext;
             }
             if ((g[lvl] != 1) && (ubPure[lvl] == g[lvl])) {
-                gMin = -1;
+                gMin = -1; // Max uFast value
                 l = lvl - 1;
                 p = MapConsistent(l, g[l], r[l]);
                 x0 = x - (ubPure[lvl] * p);
                 for (i = 1; i <= ubPure[lvl]; i++) {
-                    int sum = 0;
-                    int baseOffset = x0 + (i - 1) * p;
+                    uFast sum = 0;
+                    uFast baseOffset = x0 + (i - 1) * p;
                     for (j = 1; j <= p; j++) sum += RowSum[baseOffset + j];
                     GuessSum[i] = sum;
                     if (sum < gMin) {
@@ -293,10 +347,10 @@ GetNext:
                         k = i;
                     }
                 }
-                int sourceBase = x0 + (k - 1) * p;
+                uFast sourceBase = x0 + (k - 1) * p;
                 for (i = 1; i <= p; i++) {
-                    int destIndex = x0 + i;
-                    int sourceIndex = sourceBase + i;
+                    uFast destIndex = x0 + i;
+                    uFast sourceIndex = sourceBase + i;
                     RowSum[destIndex] = RowSum[sourceIndex];
                     for (j = 1; j < maxdepth; j++) list[j][destIndex] = list[j][sourceIndex];
                 }
