@@ -24,9 +24,15 @@ All options:
 Example end of output:
 
 ...
+
 112330  124520  114340  :3
+
 112330  124521  112540  :3
+
 112340  :1
+
 5625 / 1296 = 4.34028 average moves to finish!
+
 19.9356 seconds
+
 Press Enter to exit...
