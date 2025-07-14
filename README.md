@@ -21,6 +21,10 @@ All options:
 /GS /W3 /Gy /Zi /O2 /Ob2 /fp:fast /WX- /arch:AVX2 /Gd /Oy /Oi /MD /std:c++20 /Fa
 
 
+
+
+
+
 Example end of output:
 
 ...
